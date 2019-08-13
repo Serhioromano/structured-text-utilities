@@ -193,96 +193,20 @@ IMPLEMENTATION
 	// Converts internal DATE type to DATE_PARTS structure.
 	FUNCTION DATE_TO_PARTS : DATE_PARTS
 		VAR_INPUT
-			in : DATE;
+			in: DATE;
+			fd: BOOL; (* TRUE - first day Monday, FALSE - first day Sunday *)
 		END_VAR
 		
-		VAR_TEMP
-			in_array : ARRAY[0..3] OF BYTE; // Array for marshalling
-			days_since_1992 : UDINT;
-			anchor_in_calendar_week : DINT;
-			start_of_year : DINT;
-			start_of_year_before : DINT;
-			days_of_year_left : UDINT;
-			days_of_year : UINT;
-			days_of_month_left : UDINT;
-			days_of_month : UDINT;
-			year_is_leap : BOOL;
-			year : UINT;
-			month : SINT;
-			out : DATE_PARTS;
-		END_VAR
+		out.year  := DATE_TO_YEAR(in);
+		out.month := DATE_TO_MONTH(in);
+		out.day   := DATE_TO_DAY(in);
 		
-		in_array := ANYTYPE_TO_LITTLEBYTEARRAY(in, 0);
-		days_since_1992 := LITTLEBYTEARRAY_TO_ANYTYPE(in_array, 0);
-		days_since_1992 := days_since_1992 -1; // 1992-01-01 is encoded as 1, not 0 :-/
+		out.year_of_century := UINT_TO_USINT(out.year MOD 100);
+		out.day_of_year     := DAY_OF_YEAR(out.year, out.day);
+		out.day_of_week     := DAY_OF_WEEK(in, fd);
+		out.week_of_year    := WEEK_OF_YEAR(in, fd);
 		
-		start_of_year := 0;
-		start_of_year_before := -365;
-		days_of_year_left := days_since_1992;
-		
-		FOR year := 1992 TO 2200 DO
-			IF year MOD 4 = 0 AND (year = 2000 OR year MOD 100 <> 0) THEN
-				year_is_leap := TRUE;
-				days_of_year := 366;
-			ELSE
-				year_is_leap := FALSE;
-				days_of_year := 365;
-			END_IF;
-			
-			IF days_of_year_left >= days_of_year THEN
-				days_of_year_left := days_of_year_left - days_of_year;
-			ELSE
-				days_of_month_left := days_of_year_left;
-				
-				FOR month := 1 TO 12 DO
-					CASE month OF
-						1, 3, 5, 7, 8, 10, 12: days_of_month := 31;
-						4, 6, 9, 11: days_of_month := 30;
-						2: IF year_is_leap THEN days_of_month := 29; ELSE days_of_month := 28; END_IF;
-					END_CASE;
-					
-					IF days_of_month_left >= days_of_month THEN
-						days_of_month_left := days_of_month_left - days_of_month;
-					ELSE
-						out.year := year;
-						out.year_of_century := UINT_TO_USINT(year MOD 100);
-						out.month := SINT_TO_USINT(month);
-						out.day := UDINT_TO_USINT(days_of_month_left + 1);
-						out.day_of_year := UDINT_TO_UINT(days_of_year_left + 1);
-						
-						EXIT;
-					END_IF;
-				END_FOR;
-				
-				EXIT;
-			END_IF;
-			
-			start_of_year_before := start_of_year;
-			start_of_year := start_of_year + days_of_year;
-		END_FOR;
-		
-		out.day_of_week := UDINT_TO_USINT((days_since_1992 MOD 7 + 2) MOD 7 + 1);
-		
-		anchor_in_calendar_week := UDINT_TO_DINT(days_since_1992) - out.day_of_week + 4;
-		IF anchor_in_calendar_week < start_of_year THEN
-			out.week_of_year := DINT_TO_USINT((anchor_in_calendar_week - (start_of_year_before + 3) + ((start_of_year_before + 3) MOD 7 + 2) MOD 7 + 1 - 4) / 7 + 1);
-		ELSE
-			out.week_of_year := DINT_TO_USINT((anchor_in_calendar_week - (start_of_year + 3) + ((start_of_year + 3) MOD 7 + 2) MOD 7 + 1 - 4) / 7 + 1);
-		END_IF;
-		
-		out.iso8601 := CONCAT(UINT_TO_STRING(out.year), '-');
-		
-		IF out.month >= 10 THEN
-			out.iso8601 := CONCAT3(out.iso8601, USINT_TO_STRING(out.month), '-');
-		ELSE
-			out.iso8601 := CONCAT4(out.iso8601, '0', USINT_TO_STRING(out.month), '-');
-		END_IF;
-		
-		IF out.day >= 10 THEN
-			out.iso8601 := CONCAT(out.iso8601, USINT_TO_STRING(out.day));
-		ELSE
-			out.iso8601 := CONCAT3(out.iso8601, '0', USINT_TO_STRING(out.day));
-		END_IF;
+		out.iso8601 := MID(DATE_TO_STRING(in), 3, 10);
 		
 		DATE_TO_PARTS := out;
 	END_FUNCTION
@@ -332,7 +256,7 @@ IMPLEMENTATION
 		END_IF;
 	END_FUNCTION
 
-	FUNCTION DAY_OF_WEEK : UINT
+	FUNCTION DAY_OF_WEEK : USINT
 		VAR_INPUT
 			cur_date: DATE; (* Current date *)
 			fd:       BOOL; (* TRUE - first day Monday, FALSE - first day Sunday *)
@@ -345,13 +269,13 @@ IMPLEMENTATION
 			correction := 3;
 		END_IF;
 
-		DAY_OF_WEEK := DWORD_TO_UINT(((DATE_TO_DWORD(cur_date) / 86400) + correction) MOD 7);
+		DAY_OF_WEEK := DWORD_TO_USINT(((DATE_TO_DWORD(cur_date) / 86400) + correction) MOD 7);
 	END_FUNCTION
 
 	FUNCTION DAY_OF_YEAR : UINT
 		VAR_INPUT
 			month: UINT; (* Current month *)
-			day:   UINT; (* Current day *)
+			day:   USINT; (* Current day *)
 		END_VAR
 		VAR
 			months_days: ARRAY[1..12] OF USINT := [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -377,7 +301,7 @@ IMPLEMENTATION
 		DAY_OF_YEAR := DAY_OF_YEAR + day;
 	END_FUNCTION
 
-	FUNCTION WEEK_OF_YEAR : UINT
+	FUNCTION WEEK_OF_YEAR : USINT
 		VAR_INPUT
 			cur_date: DATE; (* Current date *);
 			fd:       BOOL; (* TRUE - first day Monday, FALSE - first day Sunday *)
@@ -407,7 +331,7 @@ IMPLEMENTATION
 		DATE_TO_YEAR := STRING_TO_UINT(MID(str, 3, 4));
 	END_FUNCTION
 	
-	FUNCTION DATE_TO_MONTH : UINT
+	FUNCTION DATE_TO_MONTH : USINT
 		VAR_INPUT
 			cur_date: DATE; (* Current date *);
 		END_VAR
@@ -416,10 +340,10 @@ IMPLEMENTATION
 		END_VAR
 
 		str := DATE_TO_STRING(cur_date); // convert to `D#2000-12-30`
-		DATE_TO_MONTH := STRING_TO_UINT(MID(str, 8, 2));
+		DATE_TO_MONTH := STRING_TO_USINT(MID(str, 8, 2));
 	END_FUNCTION
 
-	FUNCTION DATE_TO_DAY : UINT
+	FUNCTION DATE_TO_DAY : USINT
 		VAR_INPUT
 			cur_date: DATE; (* Current date *);
 		END_VAR
@@ -428,6 +352,6 @@ IMPLEMENTATION
 		END_VAR
 
 		str := DATE_TO_STRING(cur_date); // convert to `D#2000-12-30`
-		DATE_TO_DAY := STRING_TO_UINT(MID(str, 11, 2));
+		DATE_TO_DAY := STRING_TO_USINT(MID(str, 11, 2));
 	END_FUNCTION
 END_IMPLEMENTATION
